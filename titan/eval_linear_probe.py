@@ -44,6 +44,7 @@ def train_and_evaluate_logistic_regression_with_val(train_data, train_labels, va
         
         # predict on val set
         val_loss = log_loss(val_labels, logistic_reg.predict_proba(val_data))
+        # print("train info", logistic_reg.score(train_data, train_labels))
         score = -val_loss
         
         # score on val set
