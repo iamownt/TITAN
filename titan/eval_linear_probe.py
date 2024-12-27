@@ -1,4 +1,4 @@
-
+import copy
 import pickle
 import numpy as np
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
@@ -7,11 +7,12 @@ from sklearn.preprocessing import Normalizer, StandardScaler
 import torch
 from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
-
+import pandas as pd
 from titan.utils import get_eval_metrics, seed_torch
 
 
-def train_and_evaluate_logistic_regression_with_val(train_data, train_labels, val_data, val_labels, test_data, test_labels, log_spaced_values=None, max_iter=500):
+def train_and_evaluate_logistic_regression_with_val(train_data, train_labels, val_data, val_labels, test_data, test_labels,
+                                                    test_slide_id, test_patient_id, log_spaced_values=None, max_iter=500):
     seed_torch(torch.device('cpu'), 0)
     
     metric_dict = {
@@ -65,12 +66,30 @@ def train_and_evaluate_logistic_regression_with_val(train_data, train_labels, va
         test_probs = logistic_reg_final.predict_proba(test_data)
         roc_kwargs = {'multi_class': 'ovo', 'average': 'macro'}
 
+    # aggregate the slide_id to patient_id
+    agg_df = {
+        "slide_id": test_slide_id,
+        "patient_id": test_patient_id,
+        "targets": test_labels,
+        "probs": test_probs,
+    }
+    agg_df = pd.DataFrame(agg_df)
+    agg_df = agg_df.groupby("patient_id").agg({
+        "targets": "first",
+        "probs": "mean",
+    }).reset_index()
+    test_labels = agg_df["targets"].values
+    test_probs = agg_df["probs"].values
+    test_preds = (test_probs > 0.5).astype(int)
+    print(f"agg from slide {len(test_slide_id)} to patient {len(agg_df)}")
+
     eval_metrics = get_eval_metrics(test_labels, test_preds, test_probs, roc_kwargs=roc_kwargs)
     
     outputs = {
         "targets": test_labels,
         "preds": test_preds,
         "probs": test_probs,
+        "lr_model": copy.deepcopy(logistic_reg_final),
     }
         
     return eval_metrics, outputs
