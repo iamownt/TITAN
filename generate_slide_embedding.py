@@ -7,6 +7,7 @@ from transformers import AutoModel
 import numpy as np
 from tqdm import tqdm
 
+
 def inference_slide_embedding(titan_tile_path: str = "/home/user/sngp/project/titan_destination_20X/h5file",
                               titan_slide_path: str = "/home/user/sngp/project/titan_destination_20X/h5file_slide"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

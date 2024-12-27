@@ -58,7 +58,7 @@ GP_KWARGS_TITAN = {
     'num_inducing': 768,
     'gp_scale': 1.0,
     'gp_bias': 0.,
-    'gp_kernel_type': 'linear',x1
+    'gp_kernel_type': 'linear',
     'gp_input_normalization': False,
     'gp_cov_discount_factor': -1,
     'gp_cov_ridge_penalty': 1.,
@@ -122,9 +122,6 @@ def load_titan_slide_embed_on_our_setting(folds: int = 5):
     #
     lung_labels = pd.read_csv(tcga_label_path)
     print(lung_labels["slide"].iloc[0])
-    for i in range(4):
-        for j in range(5):
-            lung_labels.rename({"tao_split_trial_{}_fold{}".format(i, j): "split{}".format(i*5+j)}, axis=1, inplace=True)
     lung_labels["cohort"] = lung_labels["cohort"].apply(lambda x: {"LUAD": 0, "LUSC": 1}[x])
     slide_name_to_label_zip = dict(zip(lung_labels["slide"], lung_labels["cohort"]))
     # train the model
@@ -203,10 +200,6 @@ def load_titan_custom_slide_embed_on_our_setting(folds: int = 5, keep_ratio: flo
     else:
         print("load eat embedding from each trial and fold")
     #
-    for i in range(4):
-        for j in range(5):
-            lung_labels.rename({"tao_split_trial_{}_fold{}".format(i, j): "split{}".format(i * 5 + j)}, axis=1,
-                               inplace=True)
     lung_labels["cohort"] = lung_labels["cohort"].apply(lambda x: {"LUAD": 0, "LUSC": 1}[x])
     slide_name_to_label_zip = dict(zip(lung_labels["slide"], lung_labels["cohort"]))
     # train the model
