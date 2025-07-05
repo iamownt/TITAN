@@ -104,7 +104,9 @@ def seed_torch(device, seed=0):
         torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    
+
+    import sklearn
+    sklearn.utils.check_random_state(seed)
     
 def merge_dict(dict1, dict2):
     for k in dict2.keys():

@@ -85,6 +85,7 @@ def titan_demo_function():
     conch, eval_transform = model.return_conch()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    print("parameters", sum(p.numel() for p in conch.parameters()))
 
     # load TCGA sample data
     from huggingface_hub import hf_hub_download
@@ -106,16 +107,21 @@ def titan_demo_function():
     print("slide_embedding", slide_embedding.shape)
 
 
+# titan_demo_function()
+
 def load_titan_slide_embed_on_our_setting(folds: int = 5):
-    tcga_slide_path = "/home/user/sngp/tcga_slides/slides"
-    tcga_label_path = "/home/user/wangtao/prov-gigapath/dataset_csv/nsclc/nsclc_labels.csv"
+    tcga_slide_path = "/home/hdd1/tcga_slides/slides"
+    tcga_label_path = "/home/user/wangtao/prov-gigapath/dataset_csv/nsclc/nsclc_labels_one_run.csv"
     tcga_slide_list = os.listdir(tcga_slide_path)
     tcga_slide_name = [slide.strip('.svs') for slide in tcga_slide_list]
     titan_official_pkl = '/home/user/.cache/huggingface/hub/models--MahmoodLab--TITAN/snapshots/b2fb4f475256eb67c6e9ccbf2d6c9c3f25f20791/TCGA_TITAN_features.pkl'
+    # titan_official_pkl = "/home/user/sngp/TCGA-OT/h5_files_slide/tcga_nsclc_titan_slide_embedding.pkl"
+    # titan_official_pkl = "/home/user/sngp/project/titan_destination_20X/h5file_slide/tcga_nsclc_titan_slide_embedding.pkl"
     with open(titan_official_pkl, 'rb') as file:
         data = pickle.load(file)
     embeddings_df = pd.DataFrame({'slide_id': data['filenames'], 'embeddings': list(data['embeddings'][:])})
     embedding_df = embeddings_df[embeddings_df['slide_id'].isin(tcga_slide_name)]
+    # embedding_df["embeddings"] = embedding_df["embeddings"].apply(lambda x: x / np.linalg.norm(x))
 
     print(embedding_df.shape)
     print(embedding_df.head())
@@ -356,24 +362,25 @@ def ood_path_f(ood_dataset_name: str = "ucs", keep_ratio: float = None, fold: in
     return f"/home/user/sngp/UniConch/titan_{ood_dataset_name}_h5file_slide_eat{keep_ratio}/t{i}f{j}/{ood_dataset_name}_nsclc_titan_slide_embedding.pkl"
 
 
-# load_titan_slide_embed_on_our_setting(folds=20)
+if __name__ == "__main__":
+    # normal[previous] generation, previous slideflow based features
+
+    load_titan_slide_embed_on_our_setting(folds=20)
 
 
-# generate the ind dataset
+    # generate the ind dataset
 
-dataset = "tcga" # assess on the tcga and cptac dataset
-save_dir = f"/home/user/wangtao/prov-gigapath/TITAN/outputs/{dataset}/nsclc"
-# os.makedirs(save_dir, exist_ok=True)
-load_titan_custom_slide_embed_on_our_setting(folds=20, keep_ratio=None, dataset=dataset, save_dir=save_dir,
-                                             generate_ood=True, evalute_and_save_uncertainty=True)
-
-# TITAN CPTAC 0.96428 (baseline) -> 0.94285 (eat, 0.4) -> 0.95 (eat, 0.5) ->  0.9523 (eat, 0.6)
+    # dataset = "tcga" # assess on the tcga and cptac dataset
+    # save_dir = f"/home/user/wangtao/prov-gigapath/TITAN/outputs/{dataset}/nsclc"
+    # os.makedirs(save_dir, exist_ok=True)
+    # load_titan_custom_slide_embed_on_our_setting(folds=20, keep_ratio=None, dataset=dataset, save_dir=save_dir,
+    #                                              generate_ood=True, evalute_and_save_uncertainty=True)
 
 
-# generate ood for slide_embedding
-# load_titan_custom_slide_embed_on_our_setting(folds=5, keep_ratio=None,
-#                                              save_dir="/home/user/wangtao/prov-gigapath/TITAN/outputs/nsclc",
-#                                              generate_ood=True, evalute_and_save_uncertainty=True)
+    # generate ood for slide_embedding
+    # load_titan_custom_slide_embed_on_our_setting(folds=5, keep_ratio=None,
+    #                                              save_dir="/home/user/wangtao/prov-gigapath/TITAN/outputs/nsclc",
+    #                                              generate_ood=True, evalute_and_save_uncertainty=True)
 
 
 
