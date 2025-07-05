@@ -11,19 +11,6 @@ import time
 import pickle
 import torch
 import torch.nn as nn
-# from torch.utils.data import Dataset, DataLoader
-# import torch.nn.functional as F
-# import torch.optim as optim
-# import h5py
-# import random
-# from collections import defaultdict
-# from sklearn.metrics import roc_auc_score
-# import argparse
-# # warnings.filterwarnings('error')
-# import operator
-# import wandb
-# from functools import partial
-# import copy
 import h5py
 from huggingface_hub import login
 from transformers import AutoModel
@@ -81,6 +68,7 @@ class TitanGaussianProcess(nn.Module):
     
 
 def titan_demo_function():
+    """ A demo function to load the TITAN model and extract slide embeddings from TCGA sample data."""
     model = AutoModel.from_pretrained('MahmoodLab/TITAN', trust_remote_code=True)
     conch, eval_transform = model.return_conch()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -107,30 +95,19 @@ def titan_demo_function():
     print("slide_embedding", slide_embedding.shape)
 
 
-# titan_demo_function()
-
-def load_titan_slide_embed_on_our_setting(folds: int = 5):
-    tcga_slide_path = "/home/hdd1/tcga_slides/slides"
+def load_titan_slide_embed_with_custom_split(folds: int = 5):
     tcga_label_path = "/home/user/wangtao/prov-gigapath/dataset_csv/nsclc/nsclc_labels_one_run.csv"
-    tcga_slide_list = os.listdir(tcga_slide_path)
-    tcga_slide_name = [slide.strip('.svs') for slide in tcga_slide_list]
     titan_official_pkl = '/home/user/.cache/huggingface/hub/models--MahmoodLab--TITAN/snapshots/b2fb4f475256eb67c6e9ccbf2d6c9c3f25f20791/TCGA_TITAN_features.pkl'
-    # titan_official_pkl = "/home/user/sngp/TCGA-OT/h5_files_slide/tcga_nsclc_titan_slide_embedding.pkl"
-    # titan_official_pkl = "/home/user/sngp/project/titan_destination_20X/h5file_slide/tcga_nsclc_titan_slide_embedding.pkl"
+    lung_labels = pd.read_csv(tcga_label_path)
+    tcga_slide_name = lung_labels["slide"].to_list()
     with open(titan_official_pkl, 'rb') as file:
         data = pickle.load(file)
     embeddings_df = pd.DataFrame({'slide_id': data['filenames'], 'embeddings': list(data['embeddings'][:])})
     embedding_df = embeddings_df[embeddings_df['slide_id'].isin(tcga_slide_name)]
     # embedding_df["embeddings"] = embedding_df["embeddings"].apply(lambda x: x / np.linalg.norm(x))
-
     print(embedding_df.shape)
-    print(embedding_df.head())
-    #
-    lung_labels = pd.read_csv(tcga_label_path)
-    print(lung_labels["slide"].iloc[0])
     lung_labels["cohort"] = lung_labels["cohort"].apply(lambda x: {"LUAD": 0, "LUSC": 1}[x])
     slide_name_to_label_zip = dict(zip(lung_labels["slide"], lung_labels["cohort"]))
-    # train the model
     cross_validation_dict = {}
 
     for fold in range(folds):
@@ -147,7 +124,6 @@ def load_titan_slide_embed_on_our_setting(folds: int = 5):
         test_labels = test_data_titan_format["slide_id"].apply(lambda x: slide_name_to_label_zip[x]).values
         test_slide_id = test_data_titan_format["slide_id"]
         test_patient_id = test_slide_id
-    
 
         train_embedding = np.stack(train_data_titan_format["embeddings"].values)
         val_embedding = np.stack(val_data_titan_format["embeddings"].values)
@@ -167,7 +143,48 @@ def load_titan_slide_embed_on_our_setting(folds: int = 5):
         print(key, np.mean([cross_validation_dict[i][key] for i in range(folds)]))
 
 
-def load_titan_custom_slide_embed_on_our_setting(folds: int = 5, keep_ratio: float = None, save_dir = None,
+def create_csv(fold, outputs, save_dir, test_csv_name, slide_id, patient_id):
+    """
+    Args:
+        fold: The current fold number
+        outputs: Dictionary containing prediction outputs (probs, targets, uncertainty)
+        save_dir: Directory to save the CSV file
+        test_csv_name: Name of the output file
+        slide_id: Series or array of slide IDs
+        patient_id: Series or array of patient IDs
+    """
+    # Create initial dataframe with slide and patient IDs
+    pair_csv = pd.DataFrame({
+        'slide_id': slide_id.values if hasattr(slide_id, 'values') else slide_id,
+        "patient": patient_id.values if hasattr(patient_id, 'values') else patient_id,
+        'Outcome 0-uncertainty0': outputs["uncertainty"],
+    })
+
+    # Add prediction columns
+    pair_csv["Outcome 0-y_pred0"] = 1 - outputs["probs"]
+    pair_csv["Outcome 0-y_pred1"] = outputs["probs"]
+    pair_csv["prob_0"] = 1 - outputs["probs"]
+    pair_csv["prob_1"] = outputs["probs"]
+    pair_csv["Outcome 0-y_true"] = outputs["targets"]
+
+    # Check if we need to aggregate (multiple slides per patient)
+    if len(np.unique(patient_id)) < len(slide_id):
+        # Case: Multiple slides per patient - need to aggregate
+        print(f"Aggregating from {len(slide_id)} slides to {len(np.unique(patient_id))} patients")
+        pair_csv = pair_csv.groupby("patient").agg({
+            'Outcome 0-uncertainty0': 'mean',
+            'Outcome 0-y_true': 'first',
+            'Outcome 0-y_pred0': 'mean',
+            'Outcome 0-y_pred1': 'mean',
+            'prob_0': 'mean',
+            'prob_1': 'mean'
+        }).reset_index()
+
+    os.makedirs(save_dir / f"fold_{fold}", exist_ok=True)
+    pair_csv.to_parquet(save_dir / f"fold_{fold}" / test_csv_name, compression='gzip')
+    print(f"Saved results to {save_dir}/fold_{fold}/{test_csv_name}")
+
+def load_titan_custom_slide_embed_with_custom_split(folds: int = 5, keep_ratio: float = None, save_dir = None,
                                                  generate_ood: bool = False, evalute_and_save_uncertainty: bool = True,
                                                  dataset: str = "tcga"):
     """ for eat, we should know that when we apply eat to the test, we should not have data leak
@@ -226,12 +243,10 @@ def load_titan_custom_slide_embed_on_our_setting(folds: int = 5, keep_ratio: flo
         train_df = lung_labels[lung_labels["split{}".format(fold)] == "train"]
         val_df = lung_labels[lung_labels["split{}".format(fold)] == "val"]
         test_df = lung_labels[lung_labels["split{}".format(fold)] == "test"]
-        train_slide_id, val_slide_id, test_slide_id = train_df["slide"], val_df["slide"], test_df["slide"]
 
-
-        train_data_titan_format = embedding_df[embedding_df["slide_id"].isin(train_slide_id)]
-        val_data_titan_format = embedding_df[embedding_df["slide_id"].isin(val_slide_id)]
-        test_data_titan_format = embedding_df[embedding_df["slide_id"].isin(test_slide_id)]
+        train_data_titan_format = embedding_df[embedding_df["slide_id"].isin(train_df["slide"])]
+        val_data_titan_format = embedding_df[embedding_df["slide_id"].isin( val_df["slide"])]
+        test_data_titan_format = embedding_df[embedding_df["slide_id"].isin(test_df["slide"])]
         train_labels = train_data_titan_format["slide_id"].apply(lambda x: slide_name_to_label_zip[x]).values
         val_labels = val_data_titan_format["slide_id"].apply(lambda x: slide_name_to_label_zip[x]).values
         test_labels = test_data_titan_format["slide_id"].apply(lambda x: slide_name_to_label_zip[x]).values
@@ -267,50 +282,10 @@ def load_titan_custom_slide_embed_on_our_setting(folds: int = 5, keep_ratio: flo
             outputs["uncertainty"] = uncertainty
         else:
             outputs["uncertainty"] = np.zeros(test_labels.shape)
-            
-            
 
         cross_validation_dict[fold] = results
         if save_dir is not None:
             save_dir = Path(save_dir)
-
-            def create_csv(outputs, save_dir, test_csv_name, slide_id, patient_id):
-                """Outcome 0-y_pred0  Outcome 0-y_pred1  Outcome 0-y_true    prob_0    prob_1"""
-                pair_csv = pd.DataFrame({
-                    'slide_id': slide_id.values,
-                    "patient": patient_id.values,
-                    'Outcome 0-uncertainty0': outputs["uncertainty"],
-                })
-                if len(np.unique(patient_id)) == len(slide_id):
-                    pair_csv["Outcome 0-y_pred0"] = 1 - outputs["probs"]
-                    pair_csv["Outcome 0-y_pred1"] = outputs["probs"]
-                    pair_csv["prob_0"] = 1 - outputs["probs"]
-                    pair_csv["prob_1"] = outputs["probs"]
-                    pair_csv["Outcome 0-y_true"] = outputs["targets"]
-                else:
-                    # in ood scenario, the prob has not been aggregate
-                    if len(outputs["probs"]) != len(np.unique(patient_id)):
-                        pair_csv["Outcome 0-y_pred0"] = 1 - outputs["probs"]
-                        pair_csv["Outcome 0-y_pred1"] = outputs["probs"]
-                        pair_csv["prob_0"] = 1 - outputs["probs"]
-                        pair_csv["prob_1"] = outputs["probs"]
-                        pair_csv["Outcome 0-y_true"] = outputs["targets"]
-                        pair_csv = pair_csv.groupby("patient").agg(
-                            {'Outcome 0-uncertainty0': 'mean', 'Outcome 0-y_true': 'first', 'Outcome 0-y_pred0': 'mean',
-                             'Outcome 0-y_pred1': 'mean', 'prob_0': 'mean', 'prob_1': 'mean'}).reset_index()
-
-                    else:
-                        pair_csv = pair_csv.groupby("patient").agg(
-                            {'Outcome 0-uncertainty0': 'mean'}).reset_index()
-                        print(f"aggregation from {len(slide_id)} to {len(pair_csv)}")
-                        pair_csv["Outcome 0-y_pred0"] = 1 - outputs["probs"]
-                        pair_csv["Outcome 0-y_pred1"] = outputs["probs"]
-                        pair_csv["prob_0"] = 1 - outputs["probs"]
-                        pair_csv["prob_1"] = outputs["probs"]
-                        pair_csv["Outcome 0-y_true"] = outputs["targets"]
-
-                (save_dir / f"fold_{fold}").mkdir(parents=True, exist_ok=True)
-                pair_csv.to_parquet(save_dir / f"fold_{fold}" / test_csv_name, compression='gzip')
 
             mask_tile = 1 if keep_ratio is not None else 0
 
@@ -341,7 +316,7 @@ def load_titan_custom_slide_embed_on_our_setting(folds: int = 5, keep_ratio: flo
                     else:
                         test_csv_name = f'{ood_dataset}_pair_fold{fold}.parquet.gzip'
                     if evalute_and_save_uncertainty:
-                        create_csv(ood_outputs, save_dir, test_csv_name, ood_embedding_df["slide_id"],
+                        create_csv(fold, ood_outputs, save_dir, test_csv_name, ood_embedding_df["slide_id"],
                                    ood_embedding_df["slide_id"].apply(lambda x: stop_ood_mapper.map_slide_to_patient(x, ood_dataset)))
             else:
                 if keep_ratio:
@@ -349,7 +324,7 @@ def load_titan_custom_slide_embed_on_our_setting(folds: int = 5, keep_ratio: flo
                 else:
                     test_csv_name = f'test_pair_fold{fold}.parquet.gzip'
                 outputs["probs"] =  outputs["probs"].astype(np.float32)
-                create_csv(outputs, save_dir, test_csv_name, truly_test_slide_id, truly_test_patient_id)
+                create_csv(fold, outputs, save_dir, test_csv_name, truly_test_slide_id, truly_test_patient_id)
 
 
     for key in cross_validation_dict[0].keys():
@@ -363,22 +338,20 @@ def ood_path_f(ood_dataset_name: str = "ucs", keep_ratio: float = None, fold: in
 
 
 if __name__ == "__main__":
-    # normal[previous] generation, previous slideflow based features
-
-    load_titan_slide_embed_on_our_setting(folds=20)
-
-
+    # Evaluate the performance of the original titan slide embedding on the nsclc dataset (with custom split)
+    # Step1:
+    load_titan_slide_embed_with_custom_split(folds=20)
     # generate the ind dataset
 
     # dataset = "tcga" # assess on the tcga and cptac dataset
     # save_dir = f"/home/user/wangtao/prov-gigapath/TITAN/outputs/{dataset}/nsclc"
     # os.makedirs(save_dir, exist_ok=True)
-    # load_titan_custom_slide_embed_on_our_setting(folds=20, keep_ratio=None, dataset=dataset, save_dir=save_dir,
+    # load_titan_custom_slide_embed_with_custom_split(folds=20, keep_ratio=None, dataset=dataset, save_dir=save_dir,
     #                                              generate_ood=True, evalute_and_save_uncertainty=True)
 
 
     # generate ood for slide_embedding
-    # load_titan_custom_slide_embed_on_our_setting(folds=5, keep_ratio=None,
+    # load_titan_custom_slide_embed_with_custom_split(folds=5, keep_ratio=None,
     #                                              save_dir="/home/user/wangtao/prov-gigapath/TITAN/outputs/nsclc",
     #                                              generate_ood=True, evalute_and_save_uncertainty=True)
 
